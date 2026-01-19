@@ -21,6 +21,7 @@ import {
   Trash2,
   RefreshCw,
   BarChart3,
+  Pencil,
 } from "lucide-react";
 
 type EmployeeLite = { _id: string; empId: string; name: string };
@@ -37,6 +38,11 @@ type OtRow = {
   doubleMinutes: number;
   tripleMinutes: number;
   isNight: boolean;
+  approvedNormalMinutes?: number;
+  approvedDoubleMinutes?: number;
+  approvedTripleMinutes?: number;
+  approvedTotalMinutes?: number;
+  isApprovedOverride?: boolean;
   status: "PENDING" | "APPROVED" | "REJECTED";
 };
 
@@ -70,6 +76,7 @@ type AuditRow = {
 type ReasonOpt = { _id: string; label: string };
 
 const SHIFTS = [
+  { label: "NO Shift", value: "NO_SHIFT" },
   { label: "Shift 1", value: "Shift 1" },
   { label: "Shift 2", value: "Shift 2" },
 ];
@@ -158,6 +165,18 @@ export function OtEntryPage() {
   const [approveReasonText, setApproveReasonText] = useState("");
   const [rejectReasonId, setRejectReasonId] = useState("");
 
+  const [approvedN, setApprovedN] = useState(0);
+  const [approvedD, setApprovedD] = useState(0);
+  const [approvedT, setApprovedT] = useState(0);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+
+  const [editShift, setEditShift] = useState("Shift 1");
+  const [editInTime, setEditInTime] = useState("");
+  const [editOutTime, setEditOutTime] = useState("");
+  const [editReason, setEditReason] = useState("");
+
   async function loadEmployees() {
     setLoadingEmp(true);
     try {
@@ -213,6 +232,9 @@ export function OtEntryPage() {
     setActingId(row._id);
     setApproveReasonId("");
     setApproveReasonText("");
+    setApprovedN(row.normalMinutes);
+    setApprovedD(row.doubleMinutes);
+    setApprovedT(row.tripleMinutes);
     setApproveOpen(true);
 
     try {
@@ -238,6 +260,9 @@ export function OtEntryPage() {
     try {
       await api.patch(`/ot/${actingId}/approve`, {
         reason: finalReason || undefined,
+        approvedNormalMinutes: approvedN,
+        approvedDoubleMinutes: approvedD,
+        approvedTripleMinutes: approvedT,
       });
       toast.success("Approved", { id: t });
       setApproveOpen(false);
@@ -273,6 +298,15 @@ export function OtEntryPage() {
   }
   function pickDate(d: Date) {
     setSelectedDate(toYYYYMMDD(d));
+  }
+
+  function openEdit(row: OtRow) {
+    setEditId(row._id);
+    setEditShift(row.shift);
+    setEditInTime(row.inTime);
+    setEditOutTime(row.outTime);
+    setEditReason(row.reason || "");
+    setEditOpen(true);
   }
 
   async function openStats(date: string) {
@@ -314,10 +348,13 @@ export function OtEntryPage() {
     if (!canCreate) return toast.error("No permission to create OT");
 
     for (const [idx, r] of createRows.entries()) {
-      if (!r.employeeId) return toast.error(`Row ${idx + 1}: select employee`);
-      if (!r.shift) return toast.error(`Row ${idx + 1}: select shift`);
-      if (!r.inTime) return toast.error(`Row ${idx + 1}: in time required`);
-      if (!r.outTime) return toast.error(`Row ${idx + 1}: out time required`);
+      if (!r.employeeId?.trim())
+        return toast.error(`Row ${idx + 1}: select employee`);
+      if (!r.shift?.trim()) return toast.error(`Row ${idx + 1}: select shift`);
+      if (r.shift !== "NO_SHIFT") {
+        if (!r.inTime) return toast.error(`Row ${idx + 1}: in time required`);
+        if (!r.outTime) return toast.error(`Row ${idx + 1}: out time required`);
+      }
     }
 
     const t = toast.loading("Saving OT entries...");
@@ -327,13 +364,20 @@ export function OtEntryPage() {
         rows: createRows.map((r) => ({
           employeeId: r.employeeId,
           shift: r.shift,
-          inTime: r.inTime,
-          outTime: r.outTime,
+          inTime: r.shift === "NO_SHIFT" ? "" : r.inTime,
+          outTime: r.shift === "NO_SHIFT" ? "" : r.outTime,
           reason: r.reason?.trim() ? r.reason.trim() : undefined,
         })),
       };
 
+      console.log("Payload:", payload);
       const resp = await api.post("/ot/bulk", payload);
+      console.log(resp.data);
+
+      if ((resp.data.insertedCount ?? 0) === 0 && resp.data.errors?.length) {
+        toast.error(resp.data.errors[0], { id: t });
+        return;
+      }
       const inserted = resp.data.insertedCount ?? 0;
       const duplicates = resp.data.duplicates ?? 0;
 
@@ -351,6 +395,35 @@ export function OtEntryPage() {
     } catch (e: any) {
       const msg = e?.response?.data?.message ?? e?.message ?? "Failed to save";
       toast.error(msg, { id: t });
+    }
+  }
+
+  async function confirmEdit() {
+    if (!editId) return;
+
+    // Frontend validation to match backend rules
+    if (editShift !== "NO_SHIFT") {
+      if (!editInTime) return toast.error("In time required");
+      if (!editOutTime) return toast.error("Out time required");
+    }
+
+    const t = toast.loading("Updating...");
+    try {
+      await api.patch(`/ot/${editId}`, {
+        shift: editShift,
+        inTime: editShift === "NO_SHIFT" ? "" : editInTime,
+        outTime: editShift === "NO_SHIFT" ? "" : editOutTime,
+        reason: editReason?.trim() ? editReason.trim() : undefined,
+      });
+
+      toast.success("Updated", { id: t });
+      setEditOpen(false);
+      setEditId(null);
+
+      await loadDay(selectedDate);
+      await loadWeekStats();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? "Failed to update", { id: t });
     }
   }
 
@@ -600,6 +673,9 @@ export function OtEntryPage() {
                   Night
                 </th>
                 <th className="px-5 py-3.5 text-xs font-black uppercase tracking-wider text-gray-700">
+                  Approved OT
+                </th>
+                <th className="px-5 py-3.5 text-xs font-black uppercase tracking-wider text-gray-700">
                   Status
                 </th>
                 <th className="px-5 py-3.5 text-xs font-black uppercase tracking-wider text-gray-700">
@@ -608,138 +684,173 @@ export function OtEntryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {dayItems.map((it) => (
-                <tr
-                  key={it._id}
-                  className="transition-all duration-150 hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100/30"
-                >
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-blue/20 to-blue-100/50">
-                        <User className="h-4 w-4 text-brand-blue" />
+              {dayItems.map((it) => {
+                const shiftLabel =
+                  it.shift === "NO_SHIFT"
+                    ? "No Shift"
+                    : it.shift === "Shift 1"
+                      ? "6:30AM"
+                      : it.shift === "Shift 2"
+                        ? "8:30AM"
+                        : it.shift || "";
+                return (
+                  <tr
+                    key={it._id}
+                    className="transition-all duration-150 hover:bg-gradient-to-r hover:from-gray-50 hover:to-gray-100/30"
+                  >
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-blue/20 to-blue-100/50">
+                          <User className="h-4 w-4 text-brand-blue" />
+                        </div>
+                        <div>
+                          <div className="font-black text-gray-900">
+                            {it.employeeId?.empId}
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            {it.employeeId?.name}
+                          </div>
+                        </div>
                       </div>
-                      <div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="font-medium text-gray-900">
+                        {shiftLabel}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="font-mono font-medium text-gray-900">
+                        {it.inTime?.trim() ? it.inTime : "-"}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="font-mono font-medium text-gray-900">
+                        {it.outTime?.trim() ? it.outTime : "-"}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="text-xs text-gray-600 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                          <span>N {minutesToHuman(it.normalMinutes)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                          <span>D {minutesToHuman(it.doubleMinutes)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full bg-orange-500"></div>
+                          <span>T {minutesToHuman(it.tripleMinutes)}</span>
+                        </div>
+                      </div>
+                      <div className="mt-1 font-black text-gray-900">
+                        {minutesToHuman(sumMinutes(it))}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${it.isNight ? "bg-purple-50 text-purple-700" : "bg-gray-100 text-gray-700"}`}
+                      >
+                        <Moon className="h-3 w-3" />
+                        {it.isNight ? "Yes" : "No"}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      {it.status === "APPROVED" ? (
                         <div className="font-black text-gray-900">
-                          {it.employeeId?.empId}
+                          {minutesToHuman(it.approvedTotalMinutes ?? 0)}
                         </div>
-                        <div className="text-xs text-gray-600">
-                          {it.employeeId?.name}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="font-medium text-gray-900">{it.shift}</div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="font-mono font-medium text-gray-900">
-                      {it.inTime}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="font-mono font-medium text-gray-900">
-                      {it.outTime}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="text-xs text-gray-600 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                        <span>N {minutesToHuman(it.normalMinutes)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                        <span>D {minutesToHuman(it.doubleMinutes)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-orange-500"></div>
-                        <span>T {minutesToHuman(it.tripleMinutes)}</span>
-                      </div>
-                    </div>
-                    <div className="mt-1 font-black text-gray-900">
-                      {minutesToHuman(sumMinutes(it))}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${it.isNight ? "bg-purple-50 text-purple-700" : "bg-gray-100 text-gray-700"}`}
-                    >
-                      <Moon className="h-3 w-3" />
-                      {it.isNight ? "Yes" : "No"}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div
-                      className={[
-                        "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-black",
-                        it.status === "PENDING"
-                          ? "bg-blue-50 text-blue-700"
-                          : "",
-                        it.status === "APPROVED"
-                          ? "bg-green-50 text-green-700"
-                          : "",
-                        it.status === "REJECTED"
-                          ? "bg-red-50 text-red-700"
-                          : "",
-                      ].join(" ")}
-                    >
-                      {it.status === "PENDING" && <Clock className="h-3 w-3" />}
-                      {it.status === "APPROVED" && (
-                        <CheckCircle className="h-3 w-3" />
+                      ) : (
+                        <div className="text-xs text-gray-500">-</div>
                       )}
-                      {it.status === "REJECTED" && (
-                        <XCircle className="h-3 w-3" />
-                      )}
-                      {it.status}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      {it.status === "PENDING" && canApprove ? (
-                        <Button
-                          variant="ghost"
-                          onClick={() => openApprove(it)}
-                          icon={<CheckCircle className="h-3 w-3" />}
-                          iconPosition="left"
-                          className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
-                        >
-                          Approve
-                        </Button>
-                      ) : null}
+                    </td>
+                    <td className="px-5 py-4">
+                      <div
+                        className={[
+                          "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-black",
+                          it.status === "PENDING"
+                            ? "bg-blue-50 text-blue-700"
+                            : "",
+                          it.status === "APPROVED"
+                            ? "bg-green-50 text-green-700"
+                            : "",
+                          it.status === "REJECTED"
+                            ? "bg-red-50 text-red-700"
+                            : "",
+                        ].join(" ")}
+                      >
+                        {it.status === "PENDING" && (
+                          <Clock className="h-3 w-3" />
+                        )}
+                        {it.status === "APPROVED" && (
+                          <CheckCircle className="h-3 w-3" />
+                        )}
+                        {it.status === "REJECTED" && (
+                          <XCircle className="h-3 w-3" />
+                        )}
+                        {it.status}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex flex-wrap gap-2">
+                        {it.status === "PENDING" && canApprove ? (
+                          <Button
+                            variant="ghost"
+                            onClick={() => openApprove(it)}
+                            icon={<CheckCircle className="h-3 w-3" />}
+                            iconPosition="left"
+                            className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
+                          >
+                            Approve
+                          </Button>
+                        ) : null}
 
-                      {it.status === "PENDING" && canReject ? (
-                        <Button
-                          variant="ghost"
-                          onClick={() => openReject(it)}
-                          icon={<XCircle className="h-3 w-3" />}
-                          iconPosition="left"
-                          className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
-                        >
-                          Reject
-                        </Button>
-                      ) : null}
+                        {it.status === "PENDING" && canReject ? (
+                          <Button
+                            variant="ghost"
+                            onClick={() => openReject(it)}
+                            icon={<XCircle className="h-3 w-3" />}
+                            iconPosition="left"
+                            className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
+                          >
+                            Reject
+                          </Button>
+                        ) : null}
 
-                      {canReadAudit ? (
-                        <Button
-                          variant="ghost"
-                          onClick={() => openAuditForOt(it)}
-                          icon={<Eye className="h-3 w-3" />}
-                          iconPosition="left"
-                          className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
-                        >
-                          Audit
-                        </Button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {it.status === "PENDING" && has("ot.update") ? (
+                          <Button
+                            variant="ghost"
+                            onClick={() => openEdit(it)}
+                            icon={<Pencil className="h-3 w-3" />}
+                            iconPosition="left"
+                            className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
+                          >
+                            Edit
+                          </Button>
+                        ) : null}
+
+                        {canReadAudit ? (
+                          <Button
+                            variant="ghost"
+                            onClick={() => openAuditForOt(it)}
+                            icon={<Eye className="h-3 w-3" />}
+                            iconPosition="left"
+                            className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
+                          >
+                            Audit
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {!dayLoading && dayItems.length === 0 ? (
                 <tr>
                   <td
                     className="px-5 py-8 text-center text-gray-500"
-                    colSpan={8}
+                    colSpan={9}
                   >
                     <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-8">
                       <div className="text-sm text-gray-500">
@@ -763,6 +874,8 @@ export function OtEntryPage() {
         title={`Add OT - ${selectedDate}`}
         onClose={() => setCreateOpen(false)}
         className="max-w-[95vw] w-[1200px]"
+        closeOnBackdropClick={false}
+        size="xl"
       >
         <div className="space-y-4">
           <div className="text-sm text-gray-600">
@@ -778,84 +891,97 @@ export function OtEntryPage() {
           ) : null}
 
           <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
-            {createRows.map((r, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-gray-200 bg-gray-50/50 p-4"
-              >
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-                  <div className="md:col-span-4">
-                    <SelectField
-                      label="Employee"
-                      value={r.employeeId}
-                      onValueChange={(v) => setRow(i, { employeeId: v })}
-                      options={[
-                        { label: "Select employee", value: "", disabled: true },
-                        ...employees.map((e) => ({
-                          label: `${e.empId} - ${e.name}`,
-                          value: e._id,
-                        })),
-                      ]}
-                    />
-                  </div>
+            {createRows.map((r, i) => {
+              const isNoShift = r.shift === "NO_SHIFT";
+              return (
+                <div
+                  key={i}
+                  className="rounded-xl border border-gray-200 bg-gray-50/50 p-4"
+                >
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+                    <div className="md:col-span-4">
+                      <SelectField
+                        label="Employee"
+                        value={r.employeeId}
+                        onValueChange={(v) => setRow(i, { employeeId: v })}
+                        options={[
+                          {
+                            label: "Select employee",
+                            value: "",
+                            disabled: true,
+                          },
+                          ...employees.map((e) => ({
+                            label: `${e.empId} - ${e.name}`,
+                            value: e._id,
+                          })),
+                        ]}
+                      />
+                    </div>
 
-                  <div className="md:col-span-2">
-                    <SelectField
-                      label="Shift"
-                      value={r.shift}
-                      onValueChange={(v) => setRow(i, { shift: v })}
-                      options={SHIFTS.map((s) => ({
-                        label: s.label,
-                        value: s.value,
-                      }))}
-                    />
-                  </div>
+                    <div className="md:col-span-2">
+                      <SelectField
+                        label="Shift"
+                        value={r.shift}
+                        onValueChange={(v) => {
+                          if (v === "NO_SHIFT")
+                            setRow(i, { shift: v, inTime: "", outTime: "" });
+                          else setRow(i, { shift: v });
+                        }}
+                        options={SHIFTS.map((s) => ({
+                          label: s.label,
+                          value: s.value,
+                        }))}
+                      />
+                    </div>
 
-                  <div className="md:col-span-2">
-                    <Input
-                      label="In Time"
-                      type="time"
-                      value={r.inTime}
-                      onChange={(e) => setRow(i, { inTime: e.target.value })}
-                      className="border-gray-300"
-                    />
-                  </div>
+                    <div className="md:col-span-2">
+                      <Input
+                        label="In Time"
+                        type="time"
+                        value={r.inTime}
+                        disabled={isNoShift}
+                        onChange={(e) => setRow(i, { inTime: e.target.value })}
+                        className="border-gray-300"
+                      />
+                    </div>
 
-                  <div className="md:col-span-2">
-                    <Input
-                      label="Out Time"
-                      type="time"
-                      value={r.outTime}
-                      onChange={(e) => setRow(i, { outTime: e.target.value })}
-                      className="border-gray-300"
-                    />
-                  </div>
+                    <div className="md:col-span-2">
+                      <Input
+                        label="Out Time"
+                        type="time"
+                        value={r.outTime}
+                        disabled={isNoShift}
+                        onChange={(e) => setRow(i, { outTime: e.target.value })}
+                        className="border-gray-300"
+                      />
+                    </div>
 
-                  <div className="md:col-span-2">
-                    <Input
-                      label="Reason"
-                      value={r.reason}
-                      onChange={(e) => setRow(i, { reason: e.target.value })}
-                      className="border-gray-300"
-                    />
-                  </div>
+                    <div className="md:col-span-2">
+                      <Input
+                        label="Reason"
+                        value={r.reason || "-"}
+                        onChange={(e) => setRow(i, { reason: e.target.value })}
+                        className="border-gray-300"
+                      />
+                    </div>
 
-                  <div className="md:col-span-12 flex justify-end gap-2">
-                    {createRows.length > 1 ? (
-                      <Button
-                        variant="ghost"
-                        onClick={() => removeCreateRow(i)}
-                        icon={<Trash2 className="h-3 w-3" />}
-                        iconPosition="left"
-                        className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
-                      >
-                        Remove
-                      </Button>
-                    ) : null}
+                    <div className="md:col-span-12 flex justify-end gap-2">
+                      {createRows.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => removeCreateRow(i)}
+                          icon={<Trash2 className="h-3 w-3" />}
+                          iconPosition="left"
+                          className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-gray-100">
@@ -885,6 +1011,63 @@ export function OtEntryPage() {
                 Save
               </Button>
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal open={editOpen} title="Edit OT" onClose={() => setEditOpen(false)}>
+        <div className="space-y-4">
+          <SelectField
+            label="Shift"
+            value={editShift}
+            onValueChange={(v) => {
+              setEditShift(v);
+              if (v === "NO_SHIFT") {
+                setEditInTime("");
+                setEditOutTime("");
+              }
+            }}
+            options={SHIFTS.map((s) => ({ label: s.label, value: s.value }))}
+          />
+
+          <Input
+            label="In Time"
+            type="time"
+            value={editInTime}
+            disabled={editShift === "NO_SHIFT"}
+            onChange={(e) => setEditInTime(e.target.value)}
+          />
+
+          <Input
+            label="Out Time"
+            type="time"
+            value={editOutTime}
+            disabled={editShift === "NO_SHIFT"}
+            onChange={(e) => setEditOutTime(e.target.value)}
+          />
+
+          <Input
+            label="Reason"
+            value={editReason}
+            onChange={(e) => setEditReason(e.target.value)}
+          />
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+            <Button
+              variant="ghost"
+              onClick={() => setEditOpen(false)}
+              className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
+            >
+              Cancel
+            </Button>
+
+            <Button
+              onClick={confirmEdit}
+              className="rounded-lg border border-brand-blue bg-gradient-to-r from-brand-blue to-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:from-blue-600 hover:to-blue-700 hover:shadow"
+            >
+              Update
+            </Button>
           </div>
         </div>
       </Modal>
@@ -924,11 +1107,32 @@ export function OtEntryPage() {
         </div>
       </Modal>
 
+      {/* Approve modal */}
       <Modal
         open={approveOpen}
         title="Approve OT"
         onClose={() => setApproveOpen(false)}
       >
+        <Input
+          label="Approved Normal (minutes)"
+          type="number"
+          value={approvedN}
+          onChange={(e) => setApprovedN(Number(e.target.value))}
+        />
+
+        <Input
+          label="Approved Double (minutes)"
+          type="number"
+          value={approvedD}
+          onChange={(e) => setApprovedD(Number(e.target.value))}
+        />
+
+        <Input
+          label="Approved Triple (minutes)"
+          type="number"
+          value={approvedT}
+          onChange={(e) => setApprovedT(Number(e.target.value))}
+        />
         <div className="space-y-4">
           <SelectField
             label="Reason (optional)"

@@ -75,8 +75,8 @@ export async function createBulk(params: {
   rows: Array<{
     employeeId: string;
     shift: string;
-    inTime: string;
-    outTime: string;
+    inTime?: string;
+    outTime?: string;
     reason?: string;
   }>;
   actorUserId: string;
@@ -85,20 +85,26 @@ export async function createBulk(params: {
   const isTriple = await TripleOtDay.exists({ date: params.workDate });
 
   const docs = params.rows.map((r) => {
-    const calc = calcOtMinutes({
-      workDate: params.workDate,
-      shift: r.shift,
-      inTime: r.inTime,
-      outTime: r.outTime,
-      isTripleDay: !!isTriple,
-    });
+    const isNoShift = r.shift === "NO_SHIFT";
+
+    const calc = isNoShift
+      ? { normalMinutes: 0, doubleMinutes: 0, tripleMinutes: 0, isNight: false }
+      : calcOtMinutes({
+          workDate: params.workDate,
+          shift: r.shift,
+          inTime: r.inTime!, // safe because zod ensures
+          outTime: r.outTime!, // safe because zod ensures
+          isTripleDay: !!isTriple,
+        });
 
     return {
       employeeId: r.employeeId,
       workDate: params.workDate,
       shift: r.shift,
-      inTime: r.inTime,
-      outTime: r.outTime,
+
+      inTime: isNoShift ? "" : r.inTime!,
+      outTime: isNoShift ? "" : r.outTime!,
+
       reason: r.reason,
       ...calc,
       status: "PENDING",
@@ -136,6 +142,9 @@ export async function createBulk(params: {
       return {
         insertedCount: e.result?.nInserted ?? 0,
         duplicates: e.writeErrors.length,
+        errors: e.writeErrors
+          .slice(0, 5)
+          .map((x: any) => x.errmsg ?? x.message),
       };
     }
     throw e;
@@ -163,17 +172,24 @@ export async function updateOt(params: {
     reason: params.patch.reason ?? existing.reason,
   };
 
-  const calc = calcOtMinutes({
-    workDate,
-    shift: next.shift,
-    inTime: next.inTime,
-    outTime: next.outTime,
-    isTripleDay: !!isTriple,
-  });
+  const isNoShift = next.shift === "NO_SHIFT";
+
+  const calc = isNoShift
+    ? { normalMinutes: 0, doubleMinutes: 0, tripleMinutes: 0, isNight: false }
+    : calcOtMinutes({
+        workDate,
+        shift: next.shift,
+        inTime: next.inTime,
+        outTime: next.outTime,
+        isTripleDay: !!isTriple,
+      });
+
+  // (optional) if NO_SHIFT, wipe times
+  const next2 = isNoShift ? { ...next, inTime: "", outTime: "" } : next;
 
   const updated = await OtEntry.findByIdAndUpdate(
     params.id,
-    { ...next, ...calc, updatedBy: params.actorUserId },
+    { ...next2, ...calc, updatedBy: params.actorUserId },
     { new: true },
   ).lean();
 
@@ -201,12 +217,30 @@ export async function approveOt(params: {
   id: string;
   reason?: string;
   actorUserId: string;
+  approvedNormalMinutes?: number;
+  approvedDoubleMinutes?: number;
+  approvedTripleMinutes?: number;
   meta?: any;
 }) {
   const existing = await OtEntry.findById(params.id).lean();
   if (!existing) throw new HttpError(404, "OT entry not found");
   if (existing.status !== "PENDING")
     throw new HttpError(409, "Already decided");
+
+  const hasOverride =
+    params.approvedNormalMinutes != null ||
+    params.approvedDoubleMinutes != null ||
+    params.approvedTripleMinutes != null;
+
+  const approvedNormalMinutes =
+    params.approvedNormalMinutes ?? existing.normalMinutes ?? 0;
+  const approvedDoubleMinutes =
+    params.approvedDoubleMinutes ?? existing.doubleMinutes ?? 0;
+  const approvedTripleMinutes =
+    params.approvedTripleMinutes ?? existing.tripleMinutes ?? 0;
+
+  const approvedTotalMinutes =
+    approvedNormalMinutes + approvedDoubleMinutes + approvedTripleMinutes;
 
   const updated = await OtEntry.findByIdAndUpdate(
     params.id,
@@ -216,6 +250,12 @@ export async function approveOt(params: {
       decidedBy: params.actorUserId,
       decidedAt: new Date(),
       updatedBy: params.actorUserId,
+
+      approvedNormalMinutes,
+      approvedDoubleMinutes,
+      approvedTripleMinutes,
+      approvedTotalMinutes,
+      isApprovedOverride: hasOverride,
     },
     { new: true },
   ).lean();
@@ -226,8 +266,21 @@ export async function approveOt(params: {
     action: "APPROVE",
     actorUserId: params.actorUserId,
     diff: {
-      before: { status: "PENDING" },
-      after: { status: "APPROVED", decisionReason: params.reason },
+      before: {
+        status: "PENDING",
+        normalMinutes: existing.normalMinutes,
+        doubleMinutes: existing.doubleMinutes,
+        tripleMinutes: existing.tripleMinutes,
+      },
+      after: {
+        status: "APPROVED",
+        decisionReason: params.reason,
+        approvedNormalMinutes,
+        approvedDoubleMinutes,
+        approvedTripleMinutes,
+        approvedTotalMinutes,
+        isApprovedOverride: hasOverride,
+      },
     },
     meta: params.meta,
   });

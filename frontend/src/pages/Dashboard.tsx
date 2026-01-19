@@ -17,6 +17,7 @@ import {
   Legend,
 } from "recharts";
 import { RefreshCw, Users, User, Clock, Calendar } from "lucide-react";
+import Loading from "../components/ui/Loading";
 
 type DayStats = {
   date: string; // YYYY-MM-DD
@@ -278,7 +279,7 @@ export function DashboardPage() {
         <div className="flex items-center gap-2">
           {loading ? (
             <div className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700">
-              Loading...
+              <Loading variant="dots" />
             </div>
           ) : null}
           <Button

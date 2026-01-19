@@ -23,6 +23,7 @@ import {
 import { usePendingNotifications } from "../../hooks/usePendingNotifications";
 import { Portal } from "./Portal";
 import { api } from "../../api/client";
+import Loading from "../ui/Loading";
 
 type SidebarMode = "full" | "hidden";
 
@@ -31,15 +32,18 @@ function Item({
   label,
   Icon,
   mode,
+  onClick,
 }: {
   to: string;
   label: string;
   Icon: React.ElementType;
   mode: SidebarMode;
+  onClick?: () => void;
 }) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={({ isActive }) =>
         cn(
           "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
@@ -123,6 +127,7 @@ export function AppShell() {
   const [managementOpen, setManagementOpen] = useState(false);
   const [otOpen, setOtOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [notifOpen, setNotifOpen] = useState(false);
   const canSeeNotifs = has("ot.approve");
@@ -154,17 +159,15 @@ export function AppShell() {
       setManagementOpen(false);
     }
 
-    if (
-      path.startsWith("/ot") ||
-      path.startsWith("/triple-ot") ||
-      path.startsWith("/ot-reason")
-    ) {
+    // Only check for /ot paths, not /triple-ot or /ot-reason
+    if (path.startsWith("/ot/entry")) {
       setOtOpen(true);
     } else {
       setOtOpen(false);
     }
 
-    if (path.startsWith("/audit") || path.startsWith("/admin")) {
+    // Only check for /audit, not /admin
+    if (path.startsWith("/audit")) {
       setAdminOpen(true);
     } else {
       setAdminOpen(false);
@@ -173,7 +176,7 @@ export function AppShell() {
 
   const sidebarWidth = useMemo(() => {
     if (mode === "hidden") return "w-0";
-    return "w-64";
+    return "w-60";
   }, [mode]);
 
   return (
@@ -203,7 +206,7 @@ export function AppShell() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-black tracking-tight text-gray-900">
-                        OT<span className="text-brand-blue">System</span>
+                        OT<span className="text-brand-blue">Flow</span>
                       </div>
                       <div className="flex items-center gap-2 truncate text-xs text-gray-600">
                         <UserCircle className="h-3 w-3" />
@@ -252,7 +255,7 @@ export function AppShell() {
                 </CollapsibleGroup>
               ) : null}
 
-              {has("ot.read") || has("tripleOt.read") ? (
+              {has("ot.read") ? (
                 <CollapsibleGroup
                   label="Overtime"
                   Icon={Clock}
@@ -268,26 +271,10 @@ export function AppShell() {
                       mode={mode}
                     />
                   )}
-                  {has("tripleOt.read") && (
-                    <Item
-                      to="/triple-ot"
-                      label="Triple OT"
-                      Icon={Triangle}
-                      mode={mode}
-                    />
-                  )}
-                  {has("reasons.read") && (
-                    <Item
-                      to="/ot-reason"
-                      label="OT Reason"
-                      Icon={HelpCircle}
-                      mode={mode}
-                    />
-                  )}
                 </CollapsibleGroup>
               ) : null}
 
-              {has("roles.read") || has("audit.read") ? (
+              {has("audit.read") ? (
                 <CollapsibleGroup
                   label="Administration"
                   Icon={Shield}
@@ -303,20 +290,73 @@ export function AppShell() {
                       mode={mode}
                     />
                   )}
-                  {has("roles.read") && (
-                    <Item
-                      to="/admin/config"
-                      label="Role Management"
-                      Icon={Settings}
-                      mode={mode}
-                    />
-                  )}
                 </CollapsibleGroup>
               ) : null}
             </nav>
 
-            {/* Footer */}
-            <div className="border-t border-gray-200/50 p-4 bg-gradient-to-t from-gray-50 to-white">
+            {/* Footer with Settings and Logout */}
+            <div className="border-t border-gray-200/50 p-4 bg-gradient-to-t from-gray-50 to-white space-y-2">
+              {/* Settings Button */}
+              <Button
+                variant="ghost"
+                className={cn(
+                  "w-full justify-start transition-all duration-200",
+                  "bg-gradient-to-r from-gray-50 to-gray-100/80 text-gray-700",
+                  "hover:from-gray-100 hover:to-gray-200/80 hover:text-gray-900",
+                  "border border-gray-200 hover:border-gray-300 hover:shadow-sm",
+                )}
+                onClick={() => setSettingsOpen((o) => !o)}
+                icon={<Settings className="h-4 w-4" />}
+              >
+                {mode === "full" && (
+                  <span className="font-medium tracking-tight">Settings</span>
+                )}
+              </Button>
+
+              {/* Settings Menu - Opens vertically to top */}
+              <AnimatePresence>
+                {settingsOpen && mode === "full" && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="ml-7 space-y-1.5 border-l border-gray-200 pl-3 pb-2">
+                      {has("tripleOt.read") && (
+                        <Item
+                          to="/triple-ot"
+                          label="Triple OT"
+                          Icon={Triangle}
+                          mode={mode}
+                          onClick={() => setSettingsOpen(false)}
+                        />
+                      )}
+                      {has("reasons.read") && (
+                        <Item
+                          to="/ot-reason"
+                          label="OT Reason"
+                          Icon={HelpCircle}
+                          mode={mode}
+                          onClick={() => setSettingsOpen(false)}
+                        />
+                      )}
+                      {has("roles.read") && (
+                        <Item
+                          to="/admin/config"
+                          label="Role Management"
+                          Icon={Settings}
+                          mode={mode}
+                          onClick={() => setSettingsOpen(false)}
+                        />
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Logout Button */}
               <Button
                 variant="ghost"
                 className={cn(
@@ -419,7 +459,11 @@ export function AppShell() {
                               Pending approvals
                             </div>
                             <div className="text-xs text-gray-600 mt-0.5">
-                              {loading ? "Loading..." : `${count} pending`}
+                              {loading ? (
+                                <Loading variant="dots" />
+                              ) : (
+                                `${count} pending`
+                              )}
                             </div>
                           </div>
 

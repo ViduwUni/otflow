@@ -15,6 +15,7 @@ import {
   Lock,
   AlertCircle,
 } from "lucide-react";
+import Loading from "../components/ui/Loading";
 
 type Role = { _id: string; name: string; permissions: string[] };
 
@@ -113,12 +114,10 @@ export function AdminConfigPage() {
           <Button
             variant="ghost"
             onClick={load}
-            icon={<RefreshCw className="h-4 w-4" />}
-            iconPosition="left"
             className="text-gray-700 font-black border border-gray-300 bg-white hover:bg-gray-50"
             disabled={loading}
           >
-            {loading ? "Loading..." : "Refresh"}
+            {loading ? <Loading variant="dots" /> : "Refresh"}
           </Button>
           <Button
             onClick={() => setOpenCreate(true)}

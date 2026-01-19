@@ -12,14 +12,33 @@ const otEntrySchema = new Schema(
     workDate: { type: String, required: true, index: true },
 
     shift: { type: String, required: true, trim: true },
-    inTime: { type: String, required: true, trim: true },
-    outTime: { type: String, required: true, trim: true },
+    inTime: {
+      type: String,
+      required: function (this: any) {
+        return this.shift !== "NO_SHIFT";
+      },
+      trim: true,
+    },
+    outTime: {
+      type: String,
+      required: function (this: any) {
+        return this.shift !== "NO_SHIFT";
+      },
+      trim: true,
+    },
     reason: { type: String, required: false, trim: true },
 
     normalMinutes: { type: Number, required: true, default: 0 },
     doubleMinutes: { type: Number, required: true, default: 0 },
     tripleMinutes: { type: Number, required: true, default: 0 },
     isNight: { type: Boolean, required: true, default: false },
+
+    approvedNormalMinutes: { type: Number, required: true, default: 0 },
+    approvedDoubleMinutes: { type: Number, required: true, default: 0 },
+    approvedTripleMinutes: { type: Number, required: true, default: 0 },
+    approvedTotalMinutes: { type: Number, required: true, default: 0 },
+
+    isApprovedOverride: { type: Boolean, required: true, default: false },
 
     status: { type: String, required: true, default: "PENDING", index: true },
     decisionReason: { type: String, required: false, trim: true },

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { useAuth } from "./auth/AuthContext";
 import type { JSX } from "react";
+import Loading from "./components/ui/Loading";
 
 // Pages
 import { LoginPage } from "./pages/Login";
@@ -16,7 +17,7 @@ import { DecisionReasonsPage } from "./pages/DecisionReasonsPage";
 
 function Protected({ children }: { children: JSX.Element }) {
   const { state } = useAuth();
-  if (state.loading) return <div className="p-6">Loading...</div>;
+  if (state.loading) return <Loading variant="spinner" center="screen" text="Loading State.." />;
   if (!state.user) return <Navigate to="/login" replace />;
   return children;
 }
